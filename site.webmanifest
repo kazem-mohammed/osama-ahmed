@@ -1,0 +1,12 @@
+{
+  "name": "Osama Ahmed — Business Development Portfolio",
+  "short_name": "Osama Ahmed",
+  "description": "Business Development · Business Strategy · Market Research",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0B0E17",
+  "theme_color": "#0B0E17",
+  "icons": [
+    { "src": "assets/img/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
