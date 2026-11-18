@@ -1,490 +1,677 @@
 /* =========================================================
-   Osama Ahmed — Portfolio behavior layer
-   Theme engine · i18n · cursor · reveal · builders ·
-   project modal · lightbox · CV modal · composer · share
+   Osama Ahmed — interactions
+   Vanilla JS. No dependencies, no tracking.
    ========================================================= */
 'use strict';
 
-(() => {
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-  const root = document.documentElement;
+document.documentElement.classList.add('js');
 
-  /* ---------- state ---------- */
-  let lang = root.getAttribute('data-lang') === 'ar' ? 'ar' : 'en';
-  const T = () => OA_LANG[lang];
+(function () {
+  /* ── Small utilities ─────────────────────────────────── */
+  const $ = (sel, ctx = document) => ctx.querySelector(sel);
+  const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel));
+  const reduceQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const reduced = () => reduceQuery.matches;
+  const pad = (n) => String(n).padStart(2, '0');
+  const esc = (value) => String(value).replace(/[&<>"']/g, (m) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]
+  ));
 
-  /* ---------- toast ---------- */
-  const toastEl = $('#toast');
-  let toastTimer;
-  const toast = (msg) => {
-    toastEl.textContent = msg;
-    toastEl.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+  const state = {
+    menuOpen: false,
+    chapterOpen: false,
+    chapterIndex: 0,
+    certOpen: false,
+    mindsetOpen: false
   };
 
-  /* ---------- theme engine ---------- */
-  const themeBtn = $('#themeBtn');
-  const mql = window.matchMedia('(prefers-color-scheme: light)');
+  const siteHeader = $('#siteHeader');
+  const mobileMenu = $('#mobileMenu');
+  const menuToggle = $('#menuToggle');
+  const body = document.body;
 
-  const appliedTheme = () => {
-    const saved = localStorage.getItem('oa-theme') || 'dark';
-    return saved === 'system' ? (mql.matches ? 'light' : 'dark') : saved;
-  };
-  const setTheme = (t, persist = true) => {
-    const resolved = t === 'system' ? (mql.matches ? 'light' : 'dark') : t;
-    root.setAttribute('data-theme', resolved);
-    if (persist) localStorage.setItem('oa-theme', t);
-  };
-  setTheme(localStorage.getItem('oa-theme') || 'dark', false);
-
-  themeBtn.addEventListener('click', () => {
-    const saved = localStorage.getItem('oa-theme') || 'dark';
-    // cycle: dark → light → system → dark
-    const next = saved === 'dark' ? 'light' : saved === 'light' ? 'system' : 'dark';
-    setTheme(next);
-    toast(next === 'system' ? (lang === 'ar' ? 'مظهر النظام' : 'System theme') : next === 'light' ? (lang === 'ar' ? 'المظهر الفاتح' : 'Light mode') : (lang === 'ar' ? 'المظهر الداكن' : 'Dark mode'));
-  });
-  mql.addEventListener('change', () => {
-    if ((localStorage.getItem('oa-theme') || 'dark') === 'system') setTheme('system', false);
-  });
-
-  /* ---------- language engine ---------- */
-  const applyLang = (l) => {
-    lang = l;
-    root.setAttribute('data-lang', l);
-    root.setAttribute('lang', l);
-    root.setAttribute('dir', l === 'ar' ? 'rtl' : 'ltr');
-    localStorage.setItem('oa-lang', l);
-    document.title = l === 'ar'
-      ? 'أسامة أحمد — متخصص تطوير أعمال'
-      : 'Osama Ahmed — Business Development Professional';
-    $$('[data-i18n]').forEach(el => {
-      const k = el.getAttribute('data-i18n');
-      const v = T()[k];
-      if (v != null) el.textContent = v;
-    });
-    $$('[data-i18n-aria]').forEach(el => {
-      const v = T()[el.getAttribute('data-i18n-aria')];
-      if (v != null) el.setAttribute('aria-label', v);
-    });
-    buildDynamic();
-    $('#langBtn').setAttribute('aria-label', T().langSwitchAria);
-  };
-
-  $('#langBtn').addEventListener('click', () => {
-    applyLang(lang === 'en' ? 'ar' : 'en');
-    history.replaceState(null, '', lang === 'ar' ? '?lang=ar' : location.pathname);
-  });
-
-  /* ---------- custom cursor ---------- */
-  const cursor = $('.cursor');
-  if (cursor && matchMedia('(hover: hover) and (pointer: fine)').matches) {
-    const dot = $('.cursor__dot'), ring = $('.cursor__ring');
-    let mx = -50, my = -50, rx = mx, ry = my;
-    addEventListener('mousemove', e => {
-      mx = e.clientX; my = e.clientY;
-      dot.style.transform = `translate(${mx}px, ${my}px) translate(-50%,-50%)`;
-      cursor.classList.remove('is-hidden');
-    }, { passive: true });
-    document.addEventListener('mouseleave', () => cursor.classList.add('is-hidden'));
-    (function loop() {
-      rx += (mx - rx) * .18; ry += (my - ry) * .18;
-      ring.style.transform = `translate(${rx}px, ${ry}px) translate(-50%,-50%)`;
-      requestAnimationFrame(loop);
-    })();
-    const live = () => cursor.classList.add('is-active');
-    const die = () => cursor.classList.remove('is-active');
-    addEventListener('mouseover', e => {
-      if (e.target.closest('a, button, .chip, .proj-card, .cert-card__media, input, select, textarea')) live();
-      else die();
-    }, { passive: true });
+  function syncLock() {
+    body.classList.toggle('is-locked', state.menuOpen || state.chapterOpen || state.certOpen);
   }
 
-  /* ---------- header / progress / spy / to-top ---------- */
-  const header = $('#header'), fill = $('#progressFill'), toTop = $('#toTop');
-  const onScroll = () => {
-    const y = scrollY;
-    header.classList.toggle('scrolled', y > 24);
-    const h = document.documentElement.scrollHeight - innerHeight;
-    fill.style.width = (h > 0 ? (y / h) * 100 : 0) + '%';
-    toTop.classList.toggle('show', y > 700);
-  };
-  addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-  toTop.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
+  function focusables(container) {
+    return $$('a[href], button:not([disabled]), input:not([disabled]), select, textarea, iframe, [tabindex]:not([tabindex="-1"])', container)
+      .filter((el) => el.getClientRects().length > 0 && el.getAttribute('aria-hidden') !== 'true');
+  }
 
-  const spy = new IntersectionObserver(entries => {
-    entries.forEach(en => {
-      if (en.isIntersecting) {
-        $$('.nav__link').forEach(a =>
-          a.classList.toggle('active', a.getAttribute('href') === '#' + en.target.id));
+  function trapFocus(event, container) {
+    if (event.key !== 'Tab') return;
+    const items = focusables(container);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  /* ── Toast ───────────────────────────────────────────── */
+  const toast = $('#toast');
+  let toastTimer;
+  function showToast(message) {
+    toast.textContent = message;
+    toast.classList.add('is-visible');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2200);
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Copied to clipboard');
+      return true;
+    } catch (err) {
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.setAttribute('readonly', '');
+      field.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+      body.appendChild(field);
+      field.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      body.removeChild(field);
+      showToast(ok ? 'Copied to clipboard' : 'Copy failed — select the text manually');
+      return ok;
+    }
+  }
+
+  /* ── Header, progress, active nav ────────────────────── */
+  const progressFill = $('#progressFill');
+  let lastScroll = window.scrollY;
+
+  function onScroll() {
+    const y = window.scrollY;
+    siteHeader.classList.toggle('is-scrolled', y > 16);
+
+    if (y > 420 && y > lastScroll && !state.menuOpen && !state.chapterOpen && !state.certOpen) {
+      siteHeader.classList.add('is-hidden');
+    } else {
+      siteHeader.classList.remove('is-hidden');
+    }
+    lastScroll = y;
+
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const ratio = scrollable > 0 ? Math.min(1, Math.max(0, y / scrollable)) : 0;
+    progressFill.style.width = `${ratio * 100}%`;
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  const navLinks = $$('.primary-nav a');
+  const sectionIds = ['mindset', 'journey', 'ventures', 'capabilities', 'contact'];
+  const navObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const id = entry.target.id;
+      navLinks.forEach((link) => link.classList.toggle('is-active', link.dataset.nav === id));
+    });
+  }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
+  sectionIds.forEach((id) => {
+    const section = document.getElementById(id);
+    if (section) navObserver.observe(section);
+  });
+
+  /* ── Reveal on scroll ────────────────────────────────── */
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('is-visible');
+        revealObserver.unobserve(entry.target);
       }
     });
-  }, { rootMargin: '-45% 0px -50% 0px' });
-  ['story', 'timeline', 'skills', 'projects', 'certificates', 'contact'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) spy.observe(el);
-  });
+  }, { threshold: 0.1, rootMargin: '0px 0px -6% 0px' });
+  $$('.reveal').forEach((el) => revealObserver.observe(el));
 
-  /* ---------- mobile menu ---------- */
-  const burger = $('#burgerBtn'), nav = $('#nav');
-  const closeMenu = () => {
-    nav.classList.remove('open');
-    burger.setAttribute('aria-expanded', 'false');
-  };
-  burger.addEventListener('click', () => {
-    const open = nav.classList.toggle('open');
-    burger.setAttribute('aria-expanded', String(open));
-  });
-  $$('.nav__link, .nav__cta', nav).forEach(a => a.addEventListener('click', closeMenu));
+  /* ── Mobile menu ─────────────────────────────────────── */
+  let menuReturn = null;
+  let menuTimer;
 
-  /* ---------- reveal ---------- */
-  const revealIO = new IntersectionObserver(entries => {
-    entries.forEach(en => {
-      if (en.isIntersecting) { en.target.classList.add('in'); revealIO.unobserve(en.target); }
-    });
-  }, { threshold: .12, rootMargin: '0px 0px -40px 0px' });
-  $$('.reveal').forEach(el => revealIO.observe(el));
-
-  /* ---------- portrait tilt ---------- */
-  const tiltEl = $('[data-tilt]');
-  if (tiltEl && matchMedia('(hover: hover) and (pointer: fine)').matches &&
-      !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    tiltEl.addEventListener('mousemove', e => {
-      const r = tiltEl.getBoundingClientRect();
-      const px = (e.clientX - r.left) / r.width - .5;
-      const py = (e.clientY - r.top) / r.height - .5;
-      tiltEl.style.transform = `rotateY(${px * 7}deg) rotateX(${-py * 7}deg)`;
-    });
-    tiltEl.addEventListener('mouseleave', () => { tiltEl.style.transform = ''; });
+  function openMenu() {
+    if (state.menuOpen) return;
+    menuReturn = document.activeElement;
+    clearTimeout(menuTimer);
+    mobileMenu.hidden = false;
+    state.menuOpen = true;
+    menuToggle.setAttribute('aria-expanded', 'true');
+    syncLock();
+    requestAnimationFrame(() => mobileMenu.classList.add('is-open'));
+    setTimeout(() => {
+      const items = focusables(mobileMenu);
+      if (items.length) items[0].focus({ preventScroll: true });
+    }, 120);
   }
 
-  /* ---------- dynamic builders ---------- */
-  const esc = (s) => {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  };
+  function closeMenu(restoreFocus = true) {
+    if (!state.menuOpen) return;
+    state.menuOpen = false;
+    menuToggle.setAttribute('aria-expanded', 'false');
+    mobileMenu.classList.remove('is-open');
+    syncLock();
+    clearTimeout(menuTimer);
+    menuTimer = setTimeout(() => { mobileMenu.hidden = true; }, reduced() ? 0 : 600);
+    if (restoreFocus && menuReturn) {
+      menuToggle.focus({ preventScroll: true });
+    }
+  }
 
-  function buildDynamic() {
-    /* timeline */
-    const tl = $('#timelineList');
-    if (tl) tl.innerHTML = OA_TIMELINE.map((it, i) => `
-      <li class="tl__item reveal${it.current ? ' is-current' : ''}" ${i > 1 ? '' : 'data-no-io'}>
-        <span class="tl__dot" aria-hidden="true"></span>
-        <p class="tl__when">${esc(it.when[lang])}</p>
-        <h3 class="tl__title">${esc(it.title[lang])}</h3>
-        <p class="tl__body">${esc(it.body[lang])}</p>
-        <ul class="tl__tags">${it.tags.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
-        ${it.current ? `<span class="tl__now">${esc(T().tlNow)}</span>` : ''}
-      </li>`).join('');
+  menuToggle.addEventListener('click', () => {
+    state.menuOpen ? closeMenu() : openMenu();
+  });
+  $('#mobileClose').addEventListener('click', () => closeMenu());
 
-    /* skills */
-    const sg = $('#skillsGrid');
-    if (sg) sg.innerHTML = OA_SKILLS.map(g => `
-      <div class="skill-card reveal" data-no-io>
-        <h3>${esc(g.group[lang])}</h3>
-        <ul>${g.items.map(i => `<li>${esc(i[lang])}</li>`).join('')}</ul>
-      </div>`).join('');
+  $$('.mobile-menu__nav a, .mobile-menu__foot a, .mobile-menu a[href^="#"]').forEach((link) => {
+    if (!link.getAttribute('href').startsWith('#')) return;
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      const target = document.querySelector(link.getAttribute('href'));
+      closeMenu(false);
+      if (target) {
+        setTimeout(() => target.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth' }), 30);
+      }
+    });
+  });
 
-    /* freelance */
-    const fl = $('#freelanceList');
-    if (fl) fl.innerHTML = OA_FREELANCE.map(s => `<li>${esc(s[lang])}</li>`).join('');
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 1180 && state.menuOpen) closeMenu(false);
+  });
 
-    /* projects */
-    buildFilters();
-    const pg = $('#projGrid');
-    if (pg) pg.innerHTML = OA_PROJECTS.map(p => projectCard(p)).join('');
-    $$('.proj-card', pg).forEach(card =>
-      card.addEventListener('click', () => openProject(card.dataset.id)));
+  /* ── Mindset ─────────────────────────────────────────── */
+  const mindset = $('#mindset');
+  const mindsetHeading = $('#mindsetTitle');
+  const mindsetToggle = $('#mindsetToggle');
+  const mindsetPanel = $('#mindsetPanel');
+  const mindsetClose = $('#mindsetClose');
 
-    /* wins */
-    const wg = $('#winsGrid');
-    if (wg) wg.innerHTML = OA_WINS.map(w => `
-      <div class="win reveal" data-no-io>
-        <p class="win__big" ${lang === 'ar' ? 'dir="ltr"' : ''}>${esc(w.big)}</p>
-        <p class="win__text">${esc(w.text[lang])}</p>
-      </div>`).join('');
+  function setMindset(open) {
+    if (state.mindsetOpen === open) return;
+    state.mindsetOpen = open;
+    mindset.classList.toggle('is-open', open);
+    mindsetToggle.setAttribute('aria-expanded', String(open));
+    mindsetPanel.setAttribute('aria-hidden', String(!open));
 
-    /* certificates */
-    const cg = $('#certsGrid');
-    if (cg) cg.innerHTML = OA_CERTS.map((c, i) => `
-      <article class="cert-card reveal" data-no-io>
-        <button class="cert-card__media" data-cert="${i}" aria-label="${esc(T().certView)}: ${esc(c.course)}">
-          <img src="${c.img}" alt="${esc(c.alt)}" loading="lazy">
-        </button>
-        <div class="cert-card__body">
-          <h3 class="cert-card__course">${esc(c.course)}</h3>
-          <p class="cert-card__meta">${esc(c.issuer)} · ${esc(c.when)}</p>
-          <p class="cert-card__meta">${esc(c.name)}</p>
-          <div class="cert-card__row">
-            <span class="cert-card__hours" dir="ltr">${esc(c.hours)}</span>
-            <button class="cert-card__view" data-cert="${i}">
-              ${esc(T().certView)} <svg class="icon" aria-hidden="true"><use href="#i-share"/></svg>
-            </button>
-          </div>
+    if (open) {
+      mindsetPanel.removeAttribute('inert');
+      mindsetHeading.setAttribute('inert', '');
+      setTimeout(() => mindsetClose.focus({ preventScroll: true }), reduced() ? 0 : 80);
+    } else {
+      mindsetPanel.setAttribute('inert', '');
+      mindsetHeading.removeAttribute('inert');
+      setTimeout(() => mindsetToggle.focus({ preventScroll: true }), reduced() ? 0 : 80);
+    }
+  }
+
+  mindsetToggle.addEventListener('click', () => setMindset(true));
+  mindsetClose.addEventListener('click', () => setMindset(false));
+
+  /* ── Career timeline cards ───────────────────────────── */
+  const chapterList = $('#chapterList');
+  chapterList.innerHTML = OA_CHAPTERS.map((chapter, index) => `
+    <li class="chapter-item">
+      <button class="chapter-card" type="button" data-chapter="${index}" aria-haspopup="dialog">
+        <span class="chapter-card__top">
+          <span class="chapter-card__stage">${esc(chapter.stage)}</span>
+          <span class="chapter-card__dot" aria-hidden="true"></span>
+        </span>
+        <span class="chapter-card__ghost" aria-hidden="true">${esc(chapter.num)}</span>
+        <span class="chapter-card__name">${esc(chapter.title)}</span>
+        <span class="chapter-card__foot">
+          <span>Open chapter</span>
+          <span class="chapter-card__arrow" aria-hidden="true">
+            <svg class="icon"><use href="#i-arrow"/></svg>
+          </span>
+        </span>
+      </button>
+    </li>
+  `).join('');
+
+  const chaptersBlock = $('.chapters');
+  const lineObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        chaptersBlock.classList.add('is-visible');
+        lineObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  lineObserver.observe(chaptersBlock);
+
+  /* ── Chapter overlay ─────────────────────────────────── */
+  const chapterDialog = $('#chapterDialog');
+  const chapterContent = $('#chapterContent');
+  const chapterScroll = $('#chapterScroll');
+  const chapterCounter = $('#chapterCounter');
+  const chapterGhost = $('#chapterGhost');
+  const chapterDots = $('#chapterDots');
+  const chapterTitleLabel = $('#chapterPrevTitle');
+  const chapterNextLabel = $('#chapterNextTitle');
+  const chapterPrev = $('#chapterPrev');
+  const chapterNext = $('#chapterNext');
+  let chapterReturn = null;
+  let chapterSwitching = false;
+  let chapterTimer = null;
+
+  chapterDots.innerHTML = OA_CHAPTERS.map((chapter, index) => (
+    `<span data-dot="${index}"${index === 0 ? ' class="is-active"' : ''}></span>`
+  )).join('');
+
+  function trainingMarkup(training) {
+    return training.map((item) => `
+      <div class="training">
+        <span class="training__icon" aria-hidden="true">
+          <svg class="icon"><use href="#i-doc"/></svg>
+        </span>
+        <div class="training__body">
+          <h4>${esc(item.title)}</h4>
+          <p>${esc(item.org)}</p>
+          <small>${esc(item.meta)}</small>
         </div>
-      </article>`).join('');
-    $$('[data-cert]').forEach(b =>
-      b.addEventListener('click', () => openLightbox([OA_CERTS[+b.dataset.cert].img], 0, OA_CERTS[+b.dataset.cert].alt)));
-
-    /* observe new reveals */
-    $$('.reveal:not(.in)').forEach(el => revealIO.observe(el));
-
-    /* keep spy fresh */
-    applyFilter(curFilter);
+        ${item.cert
+          ? `<button class="view-cert" type="button" data-cert="${esc(item.cert)}">
+               View Certificate
+               <svg class="icon" aria-hidden="true"><use href="#i-arrow-up-right"/></svg>
+             </button>`
+          : '<span class="training__none">Training completed</span>'}
+      </div>
+    `).join('');
   }
 
-  function projectCard(p) {
-    const monogram = p.id === 'wadyle3b' ? '' : `<span class="proj-card__monogram">${esc(p.name)}</span>`;
-    const media = p.gallery.length
-      ? `<img src="${p.gallery[0].src}" alt="${esc(p.gallery[0].alt)}" loading="lazy">` : monogram;
+  function chapterMarkup(chapter) {
     return `
-      <button class="proj-card reveal ${p.featured ? 'is-featured' : ''}" data-id="${p.id}" data-cat="${p.cat}" style="--card-accent:${p.accent}">
-        <div class="proj-card__media">
-          ${p.featured ? `<span class="proj-card__flag">${esc(T().filterFeatured)}</span>` : ''}
-          ${media}
+      <p class="chapter__kicker">${esc(chapter.stage)} — ${esc(chapter.kicker)}</p>
+      <h3 class="chapter__title" id="chapterTitle" tabindex="-1">${esc(chapter.title)}</h3>
+      <div class="chapter__desc" id="chapterDescription">
+        ${chapter.description.map((paragraph) => `<p>${esc(paragraph)}</p>`).join('')}
+      </div>
+
+      <div class="chapter-block">
+        <h4 class="chapter-block__title">Relevant areas</h4>
+        <ul class="area-list">
+          ${chapter.areas.map((area, i) => `<li>${esc(area)}<span>${pad(i + 1)}</span></li>`).join('')}
+        </ul>
+      </div>
+
+      <div class="chapter-block">
+        <h4 class="chapter-block__title">Learning outcomes</h4>
+        <ul class="outcome-list">
+          ${chapter.outcomes.map((outcome) => `<li>${esc(outcome)}</li>`).join('')}
+        </ul>
+      </div>
+
+      <div class="chapter-block">
+        <h4 class="chapter-block__title">Training &amp; certification</h4>
+        <div class="training-list">
+          ${trainingMarkup(chapter.training)}
         </div>
-        <div class="proj-card__body">
-          <p class="proj-card__cat">${esc(p.catLabel[lang])}</p>
-          <h3 class="proj-card__name">${esc(p.name)}</h3>
-          <p class="proj-card__role">${esc(p.role[lang])}</p>
-          <div class="proj-card__meta">
-            <span class="proj-card__status">${esc(T()[p.statusKey])}</span>
-            <span class="proj-card__open">${esc(lang === 'ar' ? 'التفاصيل' : 'Details')}
-              <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></span>
-          </div>
-        </div>
-      </button>`;
+      </div>
+    `;
   }
 
-  /* ---------- filters ---------- */
-  let curFilter = 'all';
-  function buildFilters() {
-    const f = $('#filters');
-    if (!f) return;
-    const cats = [
-      ['all', T().filterAll],
-      ['featured', T().filterFeatured],
-      ['proptech', lang === 'ar' ? 'تقنية عقارية' : 'PropTech'],
-      ['fintech', lang === 'ar' ? 'تقنية مالية' : 'FinTech'],
-      ['automotive', lang === 'ar' ? 'تقنية سيارات' : 'Automotive'],
-      ['ecommerce', lang === 'ar' ? 'تجارة إلكترونية' : 'E-commerce'],
-      ['branding', lang === 'ar' ? 'هوية بصرية' : 'Branding']
-    ];
-    f.innerHTML = cats.map(([k, label]) =>
-      `<button class="chip ${k === curFilter ? 'active' : ''}" data-filter="${k}">${esc(label)}</button>`).join('');
-    $$('.chip', f).forEach(c => c.addEventListener('click', () => {
-      curFilter = c.dataset.filter;
-      $$('.chip', f).forEach(x => x.classList.toggle('active', x === c));
-      applyFilter(curFilter);
-    }));
+  function renderChapter(index, focusTitle) {
+    const chapter = OA_CHAPTERS[index];
+    chapterCounter.textContent = `${chapter.num} / ${pad(OA_CHAPTERS.length)}`;
+    chapterGhost.textContent = chapter.num;
+    chapterContent.innerHTML = chapterMarkup(chapter);
+
+    chapterDots.querySelectorAll('span').forEach((dot, i) => {
+      dot.classList.toggle('is-active', i === index);
+    });
+
+    chapterPrev.disabled = index === 0;
+    chapterNext.disabled = index === OA_CHAPTERS.length - 1;
+    chapterTitleLabel.textContent = index > 0 ? OA_CHAPTERS[index - 1].title : 'Start of journey';
+    chapterNextLabel.textContent = index < OA_CHAPTERS.length - 1 ? OA_CHAPTERS[index + 1].title : 'End of journey';
+
+    if (!reduced() && chapterContent.animate) {
+      chapterContent.animate(
+        [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'translateY(0)' }],
+        { duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+      );
+    }
+
+    if (focusTitle) {
+      setTimeout(() => {
+        const title = $('#chapterTitle', chapterContent);
+        if (title) title.focus({ preventScroll: true });
+      }, reduced() ? 0 : 160);
+    }
   }
-  function applyFilter(f) {
-    $$('.proj-card').forEach(card => {
-      const show = f === 'all' || (f === 'featured' ? card.classList.contains('is-featured') : card.dataset.cat === f);
-      card.style.display = show ? '' : 'none';
+
+  function openChapter(index, trigger) {
+    if (state.chapterOpen) return;
+    clearTimeout(chapterTimer);
+    state.chapterIndex = index;
+    chapterReturn = trigger || document.activeElement;
+    renderChapter(index, false);
+    chapterDialog.hidden = false;
+    state.chapterOpen = true;
+    syncLock();
+    chapterScroll.scrollTop = 0;
+    requestAnimationFrame(() => chapterDialog.classList.add('is-open'));
+    $('#chapterClose').focus({ preventScroll: true });
+  }
+
+  function closeChapter() {
+    if (!state.chapterOpen) return;
+    if (state.certOpen) closeCert(false);
+    state.chapterOpen = false;
+    chapterDialog.classList.remove('is-open');
+    syncLock();
+    clearTimeout(chapterTimer);
+    chapterTimer = setTimeout(() => {
+      chapterDialog.hidden = true;
+      chapterContent.innerHTML = '';
+      if (chapterReturn && document.contains(chapterReturn)) {
+        chapterReturn.focus({ preventScroll: true });
+      }
+    }, reduced() ? 0 : 780);
+  }
+
+  function goToChapter(target) {
+    if (chapterSwitching) return;
+    if (target < 0 || target >= OA_CHAPTERS.length || target === state.chapterIndex) return;
+
+    if (reduced()) {
+      state.chapterIndex = target;
+      renderChapter(target, true);
+      chapterScroll.scrollTop = 0;
+      return;
+    }
+
+    chapterSwitching = true;
+    chapterContent.classList.add('is-leaving');
+    setTimeout(() => {
+      if (!state.chapterOpen) {
+        chapterSwitching = false;
+        return;
+      }
+      state.chapterIndex = target;
+      renderChapter(target, true);
+      chapterContent.classList.remove('is-leaving');
+      chapterScroll.scrollTo({ top: 0, behavior: 'smooth' });
+      chapterSwitching = false;
+    }, 210);
+  }
+
+  chapterList.addEventListener('click', (event) => {
+    const card = event.target.closest('[data-chapter]');
+    if (!card) return;
+    openChapter(Number(card.dataset.chapter), card);
+  });
+
+  $('#chapterClose').addEventListener('click', closeChapter);
+  chapterDialog.addEventListener('click', (event) => {
+    if (event.target.closest('[data-chapter-close]')) closeChapter();
+  });
+  chapterPrev.addEventListener('click', () => goToChapter(state.chapterIndex - 1));
+  chapterNext.addEventListener('click', () => goToChapter(state.chapterIndex + 1));
+
+  chapterContent.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-cert]');
+    if (button) openCert(button.dataset.cert, button);
+  });
+
+  /* ── Ventures ────────────────────────────────────────── */
+  const ventureList = $('#ventureList');
+  ventureList.innerHTML = OA_PROJECTS.map((project) => `
+    <article class="venture" data-project="${esc(project.id)}">
+      <h3 class="venture__heading">
+        <button class="venture__head" type="button" aria-expanded="false"
+                aria-controls="venture-body-${esc(project.id)}"
+                aria-label="${esc(project.name)} — ${esc(project.cat)}. Toggle details.">
+          <span class="venture__num" aria-hidden="true">${esc(project.num)}</span>
+          <span class="venture__name">${esc(project.name)}</span>
+          <span class="venture__cat">${esc(project.cat)}</span>
+          <span class="venture__toggle" aria-hidden="true">
+            <svg class="icon"><use href="#i-plus"/></svg>
+          </span>
+        </button>
+      </h3>
+      <div class="venture__body" id="venture-body-${esc(project.id)}">
+        <div class="venture__body-inner">
+          <div class="venture__inner">
+            <div>
+              <p class="venture__desc">${esc(project.desc)}</p>
+              <dl class="venture__meta">
+                <div><dt>Role</dt><dd>${esc(project.role)}</dd></div>
+                <div><dt>Status</dt><dd>${esc(project.status)}</dd></div>
+              </dl>
+              ${project.image ? `
+                <figure class="venture__figure">
+                  <img src="${esc(project.image.src)}" alt="${esc(project.image.alt)}" loading="lazy" decoding="async">
+                  <figcaption>Wady Le3b — identity supplied by Osama</figcaption>
+                </figure>` : ''}
+            </div>
+            <div>
+              <p class="label">Key contributions</p>
+              <ul class="venture__points" style="margin-top:1rem">
+                ${project.points.map((point, i) => `<li><span>${pad(i + 1)}</span>${esc(point)}</li>`).join('')}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  `).join('');
+
+  ventureList.addEventListener('click', (event) => {
+    const head = event.target.closest('.venture__head');
+    if (!head) return;
+    const item = head.closest('.venture');
+    const isOpen = item.classList.contains('is-open');
+
+    $$('.venture', ventureList).forEach((venture) => {
+      venture.classList.remove('is-open');
+      $('.venture__head', venture).setAttribute('aria-expanded', 'false');
+    });
+
+    if (!isOpen) {
+      item.classList.add('is-open');
+      head.setAttribute('aria-expanded', 'true');
+    }
+  });
+
+  /* ── Capabilities ────────────────────────────────────── */
+  $('#capabilityGrid').innerHTML = OA_SKILLS.map((group) => `
+    <article class="capability">
+      <div class="capability__head">
+        <span>${esc(group.num)}</span>
+        <h3>${esc(group.group)}</h3>
+      </div>
+      <ul>
+        ${group.items.map((item) => `<li>${esc(item)}</li>`).join('')}
+      </ul>
+    </article>
+  `).join('');
+
+  $('#freelanceList').innerHTML = OA_FREELANCE
+    .map((item) => `<li>${esc(item)}</li>`).join('');
+
+  /* ── Certificate viewer ──────────────────────────────── */
+  const certViewer = $('#certViewer');
+  const certPanel = $('#certPanel');
+  const certCanvas = $('#certCanvas');
+  const certStage = $('#certStage');
+  const certTitle = $('#certTitle');
+  const certMeta = $('#certMeta');
+  const certOpenLink = $('#certOpen');
+  const certZoomLabel = $('#certZoom');
+  const certZoomIn = $('#certZoomIn');
+  const certZoomOut = $('#certZoomOut');
+  const certFullscreen = $('#certFullscreen');
+  let certReturn = null;
+  let certZoomValue = 1;
+  let certTimer = null;
+
+  function applyZoom() {
+    certCanvas.style.setProperty('--zoom', String(certZoomValue));
+    certCanvas.classList.toggle('is-zoomed', certZoomValue > 1);
+    certZoomLabel.textContent = `${Math.round(certZoomValue * 100)}%`;
+  }
+
+  function zoomCert(delta) {
+    certZoomValue = Math.min(2.5, Math.max(1, certZoomValue + delta));
+    applyZoom();
+    if (certZoomValue === 1) certStage.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+  }
+
+  function openCert(key, trigger) {
+    const cert = OA_CERTIFICATES[key];
+    if (!cert) return;
+
+    clearTimeout(certTimer);
+    certReturn = trigger || document.activeElement;
+    state.certOpen = true;
+    certZoomValue = 1;
+    applyZoom();
+    certTitle.textContent = cert.title;
+    certMeta.textContent = `${cert.issuer} · ${cert.meta}`;
+    certOpenLink.href = cert.src;
+    certStage.scrollTop = 0;
+    certStage.scrollLeft = 0;
+
+    if (cert.type === 'pdf') {
+      certCanvas.innerHTML = `<iframe src="${esc(cert.src)}" title="${esc(cert.alt || cert.title)}"></iframe>`;
+      certZoomIn.disabled = true;
+      certZoomOut.disabled = true;
+    } else {
+      const img = document.createElement('img');
+      img.src = cert.src;
+      img.alt = cert.alt || `${cert.title} certificate`;
+      img.decoding = 'async';
+      certCanvas.innerHTML = '';
+      certCanvas.appendChild(img);
+      certZoomIn.disabled = false;
+      certZoomOut.disabled = false;
+    }
+
+    certViewer.hidden = false;
+    syncLock();
+    requestAnimationFrame(() => certViewer.classList.add('is-open'));
+    setTimeout(() => $('#certClose').focus({ preventScroll: true }), reduced() ? 0 : 80);
+  }
+
+  function closeCert(restoreFocus = true) {
+    if (!state.certOpen) return;
+    state.certOpen = false;
+    certViewer.classList.remove('is-open');
+    syncLock();
+    clearTimeout(certTimer);
+    certTimer = setTimeout(() => {
+      certViewer.hidden = true;
+      certCanvas.innerHTML = '';
+    }, reduced() ? 0 : 300);
+    if (document.fullscreenElement && certPanel.contains(document.fullscreenElement)) {
+      document.exitFullscreen().catch(() => {});
+    }
+    if (restoreFocus && certReturn && document.contains(certReturn)) {
+      certReturn.focus({ preventScroll: true });
+    }
+  }
+
+  $('#certClose').addEventListener('click', () => closeCert());
+  certZoomIn.addEventListener('click', () => zoomCert(0.25));
+  certZoomOut.addEventListener('click', () => zoomCert(-0.25));
+  certStage.addEventListener('click', (event) => {
+    if (event.target === certStage || event.target === certCanvas) closeCert();
+  });
+
+  if (!document.fullscreenEnabled) {
+    certFullscreen.hidden = true;
+  } else {
+    certFullscreen.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        certPanel.requestFullscreen().catch(() => showToast('Fullscreen is unavailable here'));
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      const label = $('span', certFullscreen);
+      if (label) label.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
   }
 
-  /* ---------- focus trap helper ---------- */
-  function trap(modal, onClose) {
-    const focusables = () => $$('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])', modal)
-      .filter(el => el.offsetParent !== null);
-    const key = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
-      if (e.key !== 'Tab') return;
-      const f = focusables();
-      if (!f.length) return;
-      const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    modal.addEventListener('keydown', key);
-    return () => modal.removeEventListener('keydown', key);
-  }
-  let releaseTrap = null, lastFocus = null;
-
-  function openModal(modal) {
-    lastFocus = document.activeElement;
-    modal.hidden = false;
-    document.body.style.overflow = 'hidden';
-    releaseTrap = trap(modal, () => closeModal(modal));
-    const f = $$('a[href], button', modal).filter(el => el.offsetParent !== null);
-    (f[1] || f[0])?.focus();
-  }
-  function closeModal(modal) {
-    modal.hidden = true;
-    document.body.style.overflow = '';
-    releaseTrap?.(); releaseTrap = null;
-    lastFocus?.focus?.();
-  }
-  $$('[data-close-modal]').forEach(el =>
-    el.addEventListener('click', () => closeModal(el.closest('.modal'))));
-
-  /* ---------- project modal ---------- */
-  const pm = $('#projModal');
-  function openProject(id) {
-    const p = OA_PROJECTS.find(x => x.id === id);
-    if (!p) return;
-    const media = $('#pmMedia');
-    media.style.setProperty('--card-accent', p.accent);
-    media.className = 'modal__media';
-    media.innerHTML = p.gallery.length
-      ? `<img class="contain" src="${p.gallery[0].src}" alt="${esc(p.gallery[0].alt)}">`
-      : `<span class="modal__monogram">${esc(p.name)}</span>`;
-
-    $('#pmCat').textContent = p.catLabel[lang];
-    $('#pmTitle').textContent = p.name;
-    $('#pmDesc').textContent = p.desc[lang];
-
-    $('#pmFacts').innerHTML = `
-      <dt>${esc(T().projRole)}</dt><dd>${esc(p.role[lang])}</dd>
-      <dt>${esc(T().projCat)}</dt><dd>${esc(p.catLabel[lang])}</dd>
-      <dt>${esc(T().projStatus)}</dt><dd>${esc(T()[p.statusKey])}</dd>`;
-
-    const pts = $('#pmPoints');
-    pts.innerHTML = p.points[lang].map(x => `<li>${esc(x)}</li>`).join('');
-    $('#pmPointsWrap').hidden = !p.points[lang].length;
-
-    const gal = $('#pmGallery');
-    if (p.gallery.length) {
-      $('#pmGalleryWrap').hidden = false;
-      gal.innerHTML = p.gallery.map((g, i) =>
-        `<button type="button" class="${i === 0 ? 'active' : ''}" data-i="${i}">
-           <img src="${g.src}" alt="${esc(g.alt)}"></button>`).join('');
-      $$('button', gal).forEach(b => b.addEventListener('click', () => {
-        $$('button', gal).forEach(x => x.classList.toggle('active', x === b));
-        media.className = 'modal__media modal__media--cover';
-        media.innerHTML = `<img class="contain" src="${p.gallery[+b.dataset.i].src}" alt="${esc(p.gallery[+b.dataset.i].alt)}">`;
-      }));
-    } else {
-      $('#pmGalleryWrap').hidden = true;
-      gal.innerHTML = '';
-    }
-
-    const act = $('#pmActions');
-    act.innerHTML = ''; // concept-stage: no fake live links
-    if (p.gallery.length) {
-      const btn = document.createElement('button');
-      btn.className = 'btn btn--ghost btn--sm';
-      btn.textContent = lang === 'ar' ? 'عرض الشعار بحجم كامل' : 'View logo fullscreen';
-      btn.addEventListener('click', () => openLightbox(p.gallery.map(g => g.src), 0, p.gallery[0].alt));
-      act.appendChild(btn);
-    } else {
-      act.innerHTML = `<p class="modal__private">${esc(T().projActions.none)}</p>`;
-    }
-    openModal(pm);
-  }
-
-  /* ---------- lightbox ---------- */
-  const lb = $('#lightbox');
-  let lbImgs = [], lbIdx = 0, lbAlt = '';
-  function openLightbox(imgs, idx, alt) {
-    lbImgs = imgs; lbIdx = idx; lbAlt = alt || '';
-    lb.hidden = false;
-    document.body.style.overflow = 'hidden';
-    releaseTrap = trap(lb, closeLightbox);
-    renderLb();
-  }
-  function renderLb() {
-    $('#lbImg').src = lbImgs[lbIdx];
-    $('#lbImg').alt = lbAlt;
-    $('#lbCount').textContent = `${lbIdx + 1} / ${lbImgs.length}`;
-    const one = lbImgs.length < 2;
-    $('#lbPrev').style.visibility = one ? 'hidden' : 'visible';
-    $('#lbNext').style.visibility = one ? 'hidden' : 'visible';
-  }
-  function closeLightbox() {
-    lb.hidden = true;
-    document.body.style.overflow = pm.hidden ? '' : 'hidden';
-    releaseTrap?.(); releaseTrap = null;
-  }
-  const lbStep = (d) => { lbIdx = (lbIdx + d + lbImgs.length) % lbImgs.length; renderLb(); };
-  $('#lbPrev').addEventListener('click', () => lbStep(-1));
-  $('#lbNext').addEventListener('click', () => lbStep(1));
-  $$('[data-close-lb]').forEach(el => el.addEventListener('click', closeLightbox));
-  addEventListener('keydown', e => {
-    if (lb.hidden) return;
-    if (e.key === 'ArrowRight') lbStep(1);
-    if (e.key === 'ArrowLeft') lbStep(-1);
+  /* ── Copy & share ────────────────────────────────────── */
+  $$('[data-copy]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      copyText(button.dataset.copy);
+    });
   });
-  let tX = null;
-  lb.addEventListener('touchstart', e => { tX = e.touches[0].clientX; }, { passive: true });
-  lb.addEventListener('touchend', e => {
-    if (tX == null) return;
-    const dx = e.changedTouches[0].clientX - tX;
-    if (Math.abs(dx) > 48) lbStep(dx < 0 ? 1 : -1);
-    tX = null;
-  }, { passive: true });
-
-  /* ---------- CV modal ---------- */
-  $$('[data-cv]').forEach(b => b.addEventListener('click', e => {
-    e.preventDefault();
-    openModal($('#cvModal'));
-  }));
-
-  /* ---------- copy / share ---------- */
-  const copyText = async (txt) => {
-    try {
-      await navigator.clipboard.writeText(txt);
-      toast(T().copied);
-      return;
-    } catch { /* fall through to legacy path */ }
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = txt;
-      ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand('copy');
-      ta.remove();
-      toast(ok ? T().copied : T().copyFail);
-    } catch { toast(T().copyFail); }
-  };
-  $$('[data-copy]').forEach(b => b.addEventListener('click', e => {
-    e.preventDefault(); e.stopPropagation();
-    copyText(b.dataset.copy);
-  }));
-  $('#copyLinkBtn').addEventListener('click', () => copyText(location.href));
 
   const shareBtn = $('#shareBtn');
-  if (shareBtn) shareBtn.addEventListener('click', async () => {
-    const data = { title: document.title, text: T().shareText, url: location.href };
-    if (navigator.share) {
-      try { await navigator.share(data); } catch { /* user cancelled */ }
-    } else copyText(location.href);
+  if (shareBtn) {
+    shareBtn.addEventListener('click', async () => {
+      const data = {
+        title: 'Osama Ahmed — Business Development',
+        text: 'Business development, sales and strategy — an interactive professional story.',
+        url: window.location.href
+      };
+      if (navigator.share) {
+        try {
+          await navigator.share(data);
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+      copyText(data.url);
+    });
+  }
+
+  /* ── Keyboard behaviour ──────────────────────────────── */
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (state.certOpen) {
+        closeCert();
+      } else if (state.chapterOpen) {
+        closeChapter();
+      } else if (state.menuOpen) {
+        closeMenu();
+      } else if (state.mindsetOpen) {
+        setMindset(false);
+      }
+      return;
+    }
+
+    if (state.certOpen) {
+      trapFocus(event, certViewer);
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        zoomCert(0.25);
+      } else if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        zoomCert(-0.25);
+      } else if (event.key === '0') {
+        event.preventDefault();
+        certZoomValue = 1;
+        applyZoom();
+      }
+      return;
+    }
+
+    if (state.chapterOpen) {
+      trapFocus(event, chapterDialog);
+      if (event.key === 'ArrowLeft') goToChapter(state.chapterIndex - 1);
+      if (event.key === 'ArrowRight') goToChapter(state.chapterIndex + 1);
+      return;
+    }
+
+    if (state.menuOpen) {
+      trapFocus(event, mobileMenu);
+    }
   });
 
-  /* ---------- composer (mailto — no fake backend) ---------- */
-  const composer = $('#composer');
-  composer.addEventListener('submit', e => {
-    e.preventDefault();
-    const name = $('#fName'), msg = $('#fMsg');
-    let ok = true;
-    if (!name.value.trim()) { name.setAttribute('aria-invalid', 'true'); ok = false; }
-    else name.removeAttribute('aria-invalid');
-    if (!msg.value.trim()) { msg.setAttribute('aria-invalid', 'true'); ok = false; }
-    else msg.removeAttribute('aria-invalid');
-    if (!ok) return;
-    const topic = $('#fTopic');
-    const topics = { job: T().fTopicJob, freelance: T().fTopicFreelance, other: T().fTopicOther };
-    const subject = encodeURIComponent(`[${topics[topic.value]}] ${name.value.trim()}`);
-    const body = encodeURIComponent(`${msg.value.trim()}\n\n— ${name.value.trim()}`);
-    toast(T().formOk);
-    location.href = `mailto:osama.khaled.ahmed.hassan@gmail.com?subject=${subject}&body=${body}`;
-  });
-
-  /* ---------- preloader ---------- */
-  const pre = $('#preloader');
-  const killPre = () => { pre.classList.add('done'); pre.removeAttribute('aria-hidden'); };
-  if (document.readyState === 'complete') killPre();
-  else addEventListener('load', killPre);
-  setTimeout(killPre, 1600); // safety: never trap the visitor
-
-  /* ---------- boot ---------- */
-  applyLang(lang);
-  history.replaceState(null, '', lang === 'ar' ? '?lang=ar' : location.pathname);
+  /* ── Footer year ─────────────────────────────────────── */
+  $('#year').textContent = String(new Date().getFullYear());
 })();

@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://osama-ahmed.github.io/sitemap.xml
